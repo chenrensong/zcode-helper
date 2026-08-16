@@ -1,0 +1,53 @@
+name: 🐛 Bug 报告
+description: 报告一个 ZCode Helper 的问题
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈!请尽量填写以下信息,便于快速定位。
+        > 涉及账号敏感信息(令牌、邮箱)请务必打码。
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ZCode Helper 版本
+      description: 下载的 Release 文件名中的版本号
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述
+      description: 发生了什么?期望是什么?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开账号页
+        2. 点击「切换」…
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志(可选)
+      description: macOS 位于 ~/Library/Logs/zcode-helper.log;Windows 位于 %LOCALAPPDATA%\zcode-helper\Logs\
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息(可选)
+      description: ZCode 客户端版本、账号 provider(Z.ai / BigModel)、截图等

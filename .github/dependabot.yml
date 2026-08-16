@@ -1,0 +1,12 @@
+# 依赖更新检查：GitHub Actions 固定到 commit SHA 后由 dependabot 提 PR 升级；
+# pub 依赖周检（major 升级仍需人工确认 Flutter SDK 兼容性）。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pub
+    directory: /
+    schedule:
+      interval: weekly
