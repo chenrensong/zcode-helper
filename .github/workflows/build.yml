@@ -1,0 +1,147 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# 顶层默认最小权限；release job 单独提升为 contents: write
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.0'
+
+jobs:
+  test:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: test
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            artifact: zcode-helper-macos
+          - name: Windows
+            os: windows-latest
+            artifact: zcode-helper-windows
+    runs-on: ${{ matrix.os }}
+    env:
+      # 产物名拼版本：tag 推送用 tag 名；非 tag 场景 ref 名可能含 /
+      # （分支名、路径），用 run 号兜底保证文件名合法
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('run-{0}', github.run_number) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # flutter-action 的缓存只覆盖 SDK；pub 包按 lock 文件哈希单独缓存
+      - name: Cache pub packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - run: flutter pub get
+
+      - name: Build macOS
+        if: runner.os == 'macOS'
+        run: flutter build macos --release
+
+      - name: Build Windows
+        if: runner.os == 'Windows'
+        run: flutter build windows --release
+
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: |
+          cd build/macos/Build/Products/Release
+          ditto -c -k --sequesterRsrc --keepParent zcode_helper.app "$ARTIFACT.zip"
+        env:
+          ARTIFACT: ${{ github.workspace }}/${{ matrix.artifact }}-${{ env.VERSION }}
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/windows/x64/runner/Release/* `
+            -DestinationPath "$env:GITHUB_WORKSPACE/${{ matrix.artifact }}-${{ env.VERSION }}.zip"
+
+      - name: Checksum (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          shasum -a 256 "${{ matrix.artifact }}-${{ env.VERSION }}.zip" \
+            > "${{ matrix.artifact }}-${{ env.VERSION }}.zip.sha256"
+
+      - name: Checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $zip = "${{ matrix.artifact }}-${{ env.VERSION }}.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}-${{ env.VERSION }}.zip
+            ${{ matrix.artifact }}-${{ env.VERSION }}.zip.sha256
+          if-no-files-found: error
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+
+      # 汇总各平台校验和（.sha256 内容为「hash  文件名」，与 zip 同级发布）
+      - name: Merge checksums
+        run: cat dist/*.sha256 > dist/SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          generate_release_notes: true

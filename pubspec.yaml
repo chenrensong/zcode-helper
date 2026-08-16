@@ -1,0 +1,24 @@
+name: zcode_helper
+description: "ZCode Helper - manage ZCode desktop account logins, quotas, and multi-instance runtime safely."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cryptography: ^2.7.0
+  http: ^1.2.2
+  path: ^1.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/brands/
