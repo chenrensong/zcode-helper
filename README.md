@@ -44,7 +44,7 @@ ZCode Helper 把这一切变成一次点击：
 
 ## 界面预览
 
-> 🚧 截图整理中，将放置于 `docs/screenshots/`（账号页 / 实例页 / 登录流程）。
+![账号快照页](docs/screenshots/accounts.png)
 
 ## 安装
 

@@ -44,7 +44,7 @@ Native Flutter app: no Electron, no bundled services, no telemetry. Your data ne
 
 ## Screenshots
 
-> 🚧 Coming soon — will live in `docs/screenshots/`.
+![Accounts page](docs/screenshots/accounts.png)
 
 ## Installation
 
