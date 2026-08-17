@@ -78,6 +78,65 @@ jobs:
         if: runner.os == 'macOS'
         run: flutter build macos --release
 
+      # Developer ID 签名 + 公证。需要仓库 Secrets(见 README「从源码构建」):
+      #   MACOS_CERTIFICATE              导出 .p12 的 base64
+      #   MACOS_CERTIFICATE_PASSWORD     .p12 导出密码
+      #   APPLE_ID / APPLE_TEAM_ID / APPLE_APP_SPECIFIC_PASSWORD
+      # 未配置 Secrets 时自动跳过,产物为未签名包(fork / PR 场景)。
+      - name: Import signing certificate (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE" ]; then
+            echo "::notice::未配置 MACOS_CERTIFICATE,跳过签名(产物为未签名包)"
+            exit 0
+          fi
+          KEYCHAIN=build.keychain
+          PASS="ci-keychain-${RANDOM}"
+          CERTFILE=$(mktemp /tmp/certificate.XXXXXX.p12)
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$CERTFILE"
+          security create-keychain -p "$PASS" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          security unlock-keychain -p "$PASS" "$KEYCHAIN"
+          security import "$CERTFILE" -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$PASS" "$KEYCHAIN"
+          rm -f "$CERTFILE"
+          security find-identity -v -p codesigning
+
+      - name: Sign & notarize (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
+            echo "::notice::未配置公证凭据,跳过签名/公证"
+            exit 0
+          fi
+          APP="build/macos/Build/Products/Release/zcode_helper.app"
+          IDENTITY=$(security find-identity -v -p codesigning \
+            | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+          if [ -z "$IDENTITY" ]; then
+            echo "::notice::钥匙串中无 Developer ID Application 证书,跳过签名"
+            exit 0
+          fi
+          echo "Signing with: $IDENTITY"
+          codesign --force --deep --options runtime \
+            --entitlements macos/Runner/Release.entitlements \
+            --sign "$IDENTITY" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # 公证(上传 Apple 审核,1~5 分钟)→ 装订票据
+          UPLOAD="$RUNNER_TEMP/notary-upload.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$UPLOAD"
+          xcrun notarytool submit "$UPLOAD" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
+          xcrun stapler staple "$APP"
+          spctl -a -t exec -vv "$APP"
+
       - name: Build Windows
         if: runner.os == 'Windows'
         run: flutter build windows --release
