@@ -155,6 +155,49 @@ void main() {
     expect(overview.error, contains('Coding Plan'));
   });
 
+  test('BigModel 200 空 body：短退避重试后成功', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      if (calls <= 2) return http.Response('', 200);
+      return _json(_limitBody(level: 'max'));
+    });
+    final service = QuotaService(client: client, secret: 'test');
+    final overview = await service.overviewFromSnapshot(_snapshot({
+      'oauth:active_provider': 'bigmodel',
+      'oauth:bigmodel:access_token': 'bm-access-token-abcdefghijklmnop',
+    }));
+
+    expect(calls, 3);
+    expect(overview.isOk, isTrue);
+    expect(overview.plan?.label, 'Max');
+  });
+
+  test('BigModel 200 持续空 body → 友好错误而非 FormatException', () async {
+    final client = MockClient((request) async => http.Response('', 200));
+    final service = QuotaService(client: client, secret: 'test');
+    final overview = await service.overviewFromSnapshot(_snapshot({
+      'oauth:active_provider': 'bigmodel',
+      'oauth:bigmodel:access_token': 'bm-access-token-abcdefghijklmnop',
+    }));
+
+    expect(overview.status, 'error');
+    expect(overview.error, contains('空响应'));
+    expect(overview.error, isNot(contains('FormatException')));
+  });
+
+  test('BigModel 200 返回 HTML → 响应格式异常', () async {
+    final client = MockClient((request) async => http.Response('<html>502 Bad Gateway</html>', 200));
+    final service = QuotaService(client: client, secret: 'test');
+    final overview = await service.overviewFromSnapshot(_snapshot({
+      'oauth:active_provider': 'bigmodel',
+      'oauth:bigmodel:access_token': 'bm-access-token-abcdefghijklmnop',
+    }));
+
+    expect(overview.status, 'error');
+    expect(overview.error, contains('响应格式异常'));
+  });
+
   test('billing 405 → 无 Coding Plan；全部 401 → 明确过期提示', () async {
     final unsupported = MockClient((request) async => _json({'message': 'no'}, 405));
     final overview = await QuotaService(client: unsupported, secret: 'test')

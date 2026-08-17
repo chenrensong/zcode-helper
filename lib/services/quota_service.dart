@@ -105,21 +105,31 @@ class QuotaService {
   // ---- quota/limit（BigModel / Z.ai 同格式：data.limits + data.level） ----
 
   /// BigModel 专用：任何失败都作为错误结果返回（无兜底链路）。
+  /// 200 空 body（网关偶发）短退避重试；空/非 JSON 响应返回可读错误而非 FormatException。
   Future<QuotaOverview> _queryQuotaLimit(String url, String token, {required String provider}) async {
     try {
-      final res = await _client
-          .get(
-            Uri.parse(url),
-            headers: {'accept': 'application/json', 'authorization': token},
-          )
-          .timeout(Duration(seconds: timeoutSecs));
+      const emptyDelays = [500, 1500];
+      var res = await _getQuotaLimit(url, token);
+      for (final delay in emptyDelays) {
+        if (res.statusCode != 200 || res.body.trim().isNotEmpty) break;
+        await Future<void>.delayed(Duration(milliseconds: delay));
+        res = await _getQuotaLimit(url, token);
+      }
       if (res.statusCode == 401 || res.statusCode == 403) {
         return overviewError('$provider Token 已过期或无效（HTTP ${res.statusCode}）');
       }
       if (res.statusCode != 200) {
         return overviewError('$provider 额度查询失败 HTTP ${res.statusCode}');
       }
-      final decoded = jsonDecode(res.body);
+      if (res.body.trim().isEmpty) {
+        return overviewError('$provider 额度查询失败：接口返回空响应，请稍后刷新重试');
+      }
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(res.body);
+      } on FormatException {
+        return overviewError('$provider 额度查询失败：响应格式异常');
+      }
       if (decoded is! Map) return overviewError('$provider 额度查询失败');
       final code = decoded['code'];
       final msg = decoded['msg']?.toString() ?? '';
@@ -135,6 +145,15 @@ class QuotaService {
     } catch (e) {
       return overviewError('$provider 额度查询失败：$e');
     }
+  }
+
+  Future<http.Response> _getQuotaLimit(String url, String token) {
+    return _client
+        .get(
+          Uri.parse(url),
+          headers: {'accept': 'application/json', 'authorization': token},
+        )
+        .timeout(Duration(seconds: timeoutSecs));
   }
 
   /// Z.ai 优先链路：任何失败返回 null，交由 billing 兜底。
